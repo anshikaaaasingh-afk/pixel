@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Studio</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #1e1e1e;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 15px;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+
+        button,
+        select,
+        input {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 8px;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        #canvas {
+            border: 2px solid white;
+            image-rendering: pixelated;
+            touch-action: none;
+            background: white;
+        }
+
+        .active {
+            outline: 3px solid gold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🎨 Pixel Art Studio</h1>
+
+    <div class="toolbar">
+        <input type="color" id="colorPicker" value="#000000">
+
+        <button id="drawBtn" class="active">Draw</button>
+        <button id="eraseBtn">Erase</button>
+        <button id="fillBtn">Fill</button>
+
+        <button id="undoBtn">Undo</button>
+        <button id="redoBtn">Redo</button>
+
+        <button id="clearBtn">Clear</button>
+
+        <select id="gridSize">
+            <option value="16">16×16</option>
+            <option value="32" selected>32×32</option>
+            <option value="64">64×64</option>
+        </select>
+
+        <button id="saveBtn">Save</button>
+        <button id="loadBtn">Load</button>
+
+        <button id="exportBtn">PNG</button>
+
+        <input type="file" id="fileInput" hidden>
+    </div>
+
+    <canvas id="canvas" width="640" height="640"></canvas>
+
+    <script>
+
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        let gridSize = 32;
+        let pixels = [];
+
+        let tool = "draw";
+        let drawing = false;
+
+        let undoStack = [];
+        let redoStack = [];
+
+        const colorPicker = document.getElementById("colorPicker");
+
+        function createPixels(size) {
+
+            pixels = [];
+
+            for (let y = 0; y < size; y++) {
+
+                let row = [];
+
+                for (let x = 0; x < size; x++) {
+                    row.push("#ffffff");
+                }
+
+                pixels.push(row);
+            }
+
+            render();
+        }
+
+        function render() {
+
+            const cell = canvas.width / gridSize;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let y = 0; y < gridSize; y++) {
+
+                for (let x = 0; x < gridSize; x++) {
+
+                    ctx.fillStyle = pixels[y][x];
+                    ctx.fillRect(
+                        x * cell,
+                        y * cell,
+                        cell,
+                        cell
+                    );
+
+                    ctx.strokeStyle = "#ddd";
+                    ctx.strokeRect(
+                        x * cell,
+                        y * cell,
+                        cell,
+                        cell
+                    );
+                }
+            }
+        }
+
+        function saveState() {
+
+            undoStack.push(
+                JSON.stringify(pixels)
+            );
+
+            if (undoStack.length > 50) {
+                undoStack.shift();
+            }
+
+            redoStack = [];
+        }
+
+        function undo() {
+
+            if (!undoStack.length) return;
+
+            redoStack.push(
+                JSON.stringify(pixels)
+            );
+
+            pixels = JSON.parse(
+                undoStack.pop()
+            );
+
+            render();
+        }
+
+        function redo() {
+
+            if (!redoStack.length) return;
+
+            undoStack.push(
+                JSON.stringify(pixels)
+            );
+
+            pixels = JSON.parse(
+                redoStack.pop()
+            );
+
+            render();
+        }
+
+        function getCell(e) {
+
+            const rect =
+                canvas.getBoundingClientRect();
+
+            let clientX, clientY;
+
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            const x =
+                Math.floor(
+                    (clientX - rect.left) /
+                    (canvas.width / gridSize)
+                );
+
+            const y =
+                Math.floor(
+                    (clientY - rect.top) /
+                    (canvas.height / gridSize)
+                );
+
+            return { x, y };
+        }
+
+        function floodFill(x, y, target, newColor) {
+
+            if (target === newColor) return;
+
+            const stack = [[x, y]];
+
+            while (stack.length) {
+
+                const [cx, cy] = stack.pop();
+
+                if (
+                    cx < 0 ||
+                    cy < 0 ||
+                    cx >= gridSize ||
+                    cy >= gridSize
+                ) continue;
+
+                if (
+                    pixels[cy][cx] !== target
+                ) continue;
+
+                pixels[cy][cx] = newColor;
+
+                stack.push([cx + 1, cy]);
+                stack.push([cx - 1, cy]);
+                stack.push([cx, cy + 1]);
+                stack.push([cx, cy - 1]);
+            }
+        }
+
+        function paint(e) {
+
+            const { x, y } = getCell(e);
+
+            if (
+                x < 0 ||
+                y < 0 ||
+                x >= gridSize ||
+                y >= gridSize
+            ) return;
+
+            if (tool === "fill") {
+
+                saveState();
+
+                floodFill(
+                    x,
+                    y,
+                    pixels[y][x],
+                    colorPicker.value
+                );
+
+                render();
+
+                return;
+            }
+
+            pixels[y][x] =
+                tool === "erase"
+                    ? "#ffffff"
+                    : colorPicker.value;
+
+            render();
+        }
+
+        canvas.addEventListener("mousedown", e => {
+
+            saveState();
+
+            drawing = true;
+
+            paint(e);
+        });
+
+        canvas.addEventListener("mousemove", e => {
+
+            if (!drawing) return;
+
+            if (tool === "fill") return;
+
+            paint(e);
+        });
+
+        window.addEventListener("mouseup", () => {
+
+            drawing = false;
+        });
+
+        canvas.addEventListener("touchstart", e => {
+
+            e.preventDefault();
+
+            saveState();
+
+            drawing = true;
+
+            paint(e);
+        });
+
+        canvas.addEventListener("touchmove", e => {
+
+            e.preventDefault();
+
+            if (!drawing) return;
+
+            if (tool === "fill") return;
+
+            paint(e);
+        });
+
+        canvas.addEventListener("touchend", () => {
+
+            drawing = false;
+        });
+
+        document.getElementById("drawBtn")
+            .onclick = () => {
+                tool = "draw";
+                setActive("drawBtn");
+            };
+
+        document.getElementById("eraseBtn")
+            .onclick = () => {
+                tool = "erase";
+                setActive("eraseBtn");
+            };
+
+        document.getElementById("fillBtn")
+            .onclick = () => {
+                tool = "fill";
+                setActive("fillBtn");
+            };
+
+        function setActive(id) {
+
+            document
+                .querySelectorAll("button")
+                .forEach(btn =>
+                    btn.classList.remove("active")
+                );
+
+            document
+                .getElementById(id)
+                .classList.add("active");
+        }
+
+        document.getElementById("undoBtn")
+            .onclick = undo;
+
+        document.getElementById("redoBtn")
+            .onclick = redo;
+
+        document.getElementById("clearBtn")
+            .onclick = () => {
+
+                saveState();
+
+                createPixels(gridSize);
+            };
+
+        document.getElementById("gridSize")
+            .onchange = e => {
+
+                gridSize =
+                    Number(e.target.value);
+
+                createPixels(gridSize);
+            };
+
+        document.getElementById("exportBtn")
+            .onclick = () => {
+
+                const link =
+                    document.createElement("a");
+
+                link.download = "pixel-art.png";
+
+                link.href =
+                    canvas.toDataURL();
+
+                link.click();
+            };
+
+        document.getElementById("saveBtn")
+            .onclick = () => {
+
+                const blob =
+                    new Blob(
+                        [JSON.stringify({
+                            gridSize,
+                            pixels
+                        })],
+                        {
+                            type: "application/json"
+                        });
+
+                const link =
+                    document.createElement("a");
+
+                link.href =
+                    URL.createObjectURL(blob);
+
+                link.download =
+                    "project.json";
+
+                link.click();
+            };
+
+        document.getElementById("loadBtn")
+            .onclick = () => {
+
+                document
+                    .getElementById("fileInput")
+                    .click();
+            };
+
+        document.getElementById("fileInput")
+            .addEventListener(
+                "change",
+                e => {
+
+                    const file =
+                        e.target.files[0];
+
+                    if (!file) return;
+
+                    const reader =
+                        new FileReader();
+
+                    reader.onload = () => {
+
+                        const data =
+                            JSON.parse(reader.result);
+
+                        gridSize =
+                            data.gridSize;
+
+                        pixels =
+                            data.pixels;
+
+                        document
+                            .getElementById(
+                                "gridSize"
+                            ).value =
+                            gridSize;
+
+                        render();
+                    };
+
+                    reader.readAsText(file);
+                });
+
+        document.addEventListener(
+            "keydown",
+            e => {
+
+                if (
+                    e.ctrlKey &&
+                    e.key === "z"
+                ) {
+                    undo();
+                }
+
+                if (
+                    e.ctrlKey &&
+                    e.key === "y"
+                ) {
+                    redo();
+                }
+            });
+
+        createPixels(gridSize);
+
+    </script>
+
+</body>
+
+</html>
